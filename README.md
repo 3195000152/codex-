@@ -130,6 +130,31 @@ C:\Users\Administrator\.codex
 - Python 3.8 及以上
 - Tkinter
 
+## Python 依赖说明
+
+这个项目默认不依赖第三方 Python 包。
+
+也就是说：
+
+- 不需要执行 `pip install -r requirements.txt`
+- 不需要额外安装 `requests`、`toml`、`pillow` 之类的包
+- 只要 Python 自带标准库可用，并且带有 `Tkinter`，就可以直接运行
+
+当前代码使用到的都是 Python 标准库：
+
+- `datetime`
+- `json`
+- `os`
+- `shutil`
+- `sqlite3`
+- `threading`
+- `traceback`
+- `uuid`
+- `webbrowser`
+- `tkinter`
+
+如果你的 Python 缺少 `Tkinter`，程序会直接报错并退出。
+
 说明：
 
 - 这个工具不会自动安装 Python
