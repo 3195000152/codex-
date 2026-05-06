@@ -15,7 +15,7 @@ except ImportError:
     raise SystemExit("Tkinter is required to run this tool.")
 
 
-APP_TITLE = "Codex Provider 恢复工具"
+APP_TITLE = "Codex 对话恢复与清理工具"
 DEFAULT_CODEX_HOME = os.path.join(os.path.expanduser("~"), ".codex")
 
 
