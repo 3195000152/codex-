@@ -124,10 +124,29 @@ C:\Users\Administrator\.codex
 - `start_provider_repair.bat`
 - `启动恢复工具.bat`
 
+## 环境要求
+
+- Windows 系统
+- Python 3.8 及以上
+- Tkinter
+
+说明：
+
+- 这个工具不会自动安装 Python
+- 也不会自动安装依赖环境
+- 启动脚本只是执行 `python provider_repair_gui.py`
+- 如果系统里没有 Python，或当前 Python 没带 Tkinter，程序就无法启动
+
 前提：
 
 - 已安装 Python
 - Python 自带 Tkinter
+
+建议：
+
+- 推荐安装 Python 3.10、3.11 或 3.12
+- 安装 Python 时勾选“Add Python to PATH”
+- 安装完成后可在命令行执行 `python --version` 检查是否生效
 
 ## 文件说明
 
