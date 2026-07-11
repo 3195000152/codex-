@@ -28,6 +28,9 @@ DEFAULT_CODEX_HOME = os.path.join(os.path.expanduser("~"), ".codex")
 
 
 def get_backup_root():
+    configured = os.environ.get("CODEX_PROVIDER_REPAIR_BACKUP_DIR")
+    if configured:
+        return os.path.abspath(os.path.expanduser(configured))
     return os.path.join(os.path.abspath(os.getcwd()), "备份")
 
 

@@ -99,13 +99,14 @@
 
 ## 备份机制
 
-程序会在当前目录下自动创建 `备份` 文件夹，并把修复或删除前的备份放进去。
+程序会在修复或删除前自动备份数据库、会话文件和配置。
 
-这样做的好处是：
+备份位置：
 
-- 不依赖别人电脑里固定的路径
-- 工具复制到哪里都能直接用
-- 备份位置更直观，方便回滚
+- Windows 双击或从源码目录直接运行时：当前目录下的 `备份/`
+- Linux 安装为桌面应用后：`~/.local/share/codex-provider-repair/backups/`
+
+这样既保留了源码目录直接运行的便携性，也避免 Linux 桌面启动时把备份散落到不明确的位置。
 
 ## 默认目录
 
@@ -126,7 +127,41 @@
 - `start_provider_repair.bat`
 - `启动恢复工具.bat`
 
-### Linux / macOS
+### Linux
+
+推荐安装为桌面应用：
+
+```bash
+./install_linux.sh
+```
+
+安装完成后，可以在应用菜单里搜索并打开：
+
+```text
+Codex 对话恢复与清理工具
+```
+
+也可以在终端运行：
+
+```bash
+codex-provider-repair
+```
+
+卸载：
+
+```bash
+./uninstall_linux.sh
+```
+
+卸载默认会保留备份目录。
+
+如果只是临时从源码目录启动，也可以执行：
+
+```bash
+./start_provider_repair.sh
+```
+
+### macOS
 
 在项目目录执行：
 
@@ -161,6 +196,8 @@ python3 provider_repair_gui.py
 - `os`
 - `shutil`
 - `sqlite3`
+- `subprocess`
+- `sys`
 - `threading`
 - `traceback`
 - `uuid`
@@ -173,6 +210,7 @@ python3 provider_repair_gui.py
 - 也不会自动安装依赖环境
 - Windows 启动脚本只是执行 `python provider_repair_gui.py`
 - Linux/macOS 启动脚本会执行 `python3 provider_repair_gui.py`
+- Linux 安装脚本会把应用复制到 `~/.local/share/codex-provider-repair/`，并创建 `~/.local/share/applications/codex-provider-repair.desktop`
 - 如果系统里没有 Python，或当前 Python 没带 `Tkinter`，程序就无法启动
 - 如果你的 Python 缺少 `Tkinter`，程序会直接报错并退出
 
@@ -201,4 +239,6 @@ sudo pacman -S tk
 - `start_provider_repair.bat`：英文启动脚本
 - `启动恢复工具.bat`：中文启动脚本
 - `start_provider_repair.sh`：Linux/macOS 启动脚本
+- `install_linux.sh`：Linux 用户级安装脚本，会创建应用菜单入口
+- `uninstall_linux.sh`：Linux 用户级卸载脚本
 - `备份/`：运行后自动生成的备份目录
