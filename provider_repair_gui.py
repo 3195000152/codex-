@@ -25,6 +25,25 @@ except ImportError:
 
 APP_TITLE = "Codex 对话恢复与清理工具"
 DEFAULT_CODEX_HOME = os.path.join(os.path.expanduser("~"), ".codex")
+RESERVED_PROVIDER_IDS = {
+    "openai",
+    "anthropic",
+    "google",
+    "azure",
+    "mistral",
+    "cohere",
+    "meta",
+    "xai",
+    "deepseek",
+    "perplexity",
+}
+BUILTIN_PROVIDER_RENAME_SUFFIX = "-custom"
+
+
+def sanitize_provider_name(name):
+    if name and name.lower() in RESERVED_PROVIDER_IDS:
+        return name + BUILTIN_PROVIDER_RENAME_SUFFIX
+    return name
 
 
 def get_backup_root():
@@ -319,19 +338,29 @@ class ProviderRepairApp(tk.Tk):
             self.apply_result(scan)
             return
 
+        reserved_in_config = scan.get("reserved_in_config", [])
         missing = scan.get("missing_history_providers", [])
-        if not missing:
+        if not missing and not reserved_in_config:
             messagebox.showinfo(APP_TITLE, "没有发现缺失的历史 provider，当前配置已经兼容。")
             self.apply_result(scan)
             return
 
-        vendor_url = scan.get("active_vendor_url") or "-"
-        msg = (
-            "将先备份 config.toml，然后为这些历史 provider 名称补充兼容别名：\n\n"
-            "%s\n\n"
-            "这些别名都会指向当前使用的供货商链接：\n%s\n\n"
-            "是否继续？"
-        ) % (", ".join(missing), vendor_url)
+        parts = []
+        if reserved_in_config:
+            parts.append(
+                "检测到 config.toml 使用了保留的内置 provider ID：%s\n"
+                "将自动重命名为安全名称，例如 openai -> openai-custom。"
+                % ", ".join(reserved_in_config)
+            )
+        if missing:
+            vendor_url = scan.get("active_vendor_url") or "-"
+            parts.append(
+                "为这些历史 provider 名称补充兼容别名：\n%s\n\n"
+                "这些别名都会指向当前使用的供货商链接：\n%s"
+                % (", ".join(missing), vendor_url)
+            )
+
+        msg = "将先备份 config.toml，然后：\n\n%s\n\n是否继续？" % "\n\n".join(parts)
         if not messagebox.askyesno(APP_TITLE, msg):
             self.apply_result(scan)
             return
@@ -721,6 +750,9 @@ def scan_codex_home(codex_home, verify_only=False):
     active_vendor_url = (active_profile or {}).get("base_url")
     current_vendor_name = infer_vendor_name(repair_source_provider, active_profile)
     state_db = os.path.join(codex_home, "state_5.sqlite")
+    reserved_in_config = sorted(
+        name for name in defined_providers if name.lower() in RESERVED_PROVIDER_IDS
+    )
 
     result = {
         "action": "验证" if verify_only else "扫描",
@@ -732,6 +764,7 @@ def scan_codex_home(codex_home, verify_only=False):
         "current_vendor_name": current_vendor_name,
         "active_vendor_url": active_vendor_url,
         "codex_current_url": codex_current_url,
+        "reserved_in_config": reserved_in_config,
         "db_counts": {},
         "db_total": 0,
         "db_non_current": 0,
@@ -743,6 +776,15 @@ def scan_codex_home(codex_home, verify_only=False):
         "missing_history_providers": [],
         "errors": [],
     }
+
+    if reserved_in_config:
+        result["errors"].append(
+            "config.toml 包含保留的内置 provider ID：%s。建议改名为 %s。"
+            % (
+                ", ".join(reserved_in_config),
+                ", ".join(sanitize_provider_name(name) for name in reserved_in_config),
+            )
+        )
 
     history_providers = set()
 
@@ -834,6 +876,33 @@ def extract_provider_block(text, provider_name):
     return "\n".join(lines[start:end]).rstrip()
 
 
+def parse_model_provider_header(line):
+    stripped = line.strip()
+    prefix = "[model_providers."
+    if not stripped.startswith(prefix) or not stripped.endswith("]"):
+        return None
+    name = stripped[len(prefix):-1].strip()
+    if name.startswith('"') and name.endswith('"'):
+        name = name[1:-1]
+    elif name.startswith("'") and name.endswith("'"):
+        name = name[1:-1]
+    return name or None
+
+
+def unique_safe_provider_name(name, existing_names):
+    base = sanitize_provider_name(name)
+    existing_lower = {item.lower() for item in existing_names}
+    if base.lower() not in existing_lower or base.lower() == name.lower():
+        return base
+
+    index = 2
+    while True:
+        candidate = "%s-%s" % (base, index)
+        if candidate.lower() not in existing_lower:
+            return candidate
+        index += 1
+
+
 def build_alias_block(source_block, alias_name):
     lines = source_block.splitlines()
     header = "[model_providers.%s]" % alias_name
@@ -865,15 +934,65 @@ def add_provider_aliases_to_config(codex_home, source_provider, aliases, backup_
     added = []
     new_text = text.rstrip()
     for alias in aliases:
-        if extract_provider_block(new_text, alias):
+        safe_alias = sanitize_provider_name(alias)
+        if extract_provider_block(new_text, safe_alias):
             continue
-        new_text += "\n\n" + build_alias_block(source_block, alias)
-        added.append(alias)
+        new_text += "\n\n" + build_alias_block(source_block, safe_alias)
+        added.append(safe_alias)
     new_text += "\n"
 
     if added:
         write_text(config_path, new_text)
     return added
+
+
+def fix_reserved_provider_blocks_in_config(codex_home, backup_dir):
+    config_path = os.path.join(codex_home, "config.toml")
+    if not os.path.isfile(config_path):
+        return []
+
+    text = read_text(config_path)
+    lines = text.splitlines()
+    existing_names = set(read_model_provider_profiles(codex_home).keys())
+    rename_map = {}
+    fixed = []
+
+    for index, line in enumerate(lines):
+        name = parse_model_provider_header(line)
+        if not name or name.lower() not in RESERVED_PROVIDER_IDS:
+            continue
+
+        safe_name = unique_safe_provider_name(name, existing_names)
+        existing_names.discard(name)
+        existing_names.add(safe_name)
+        rename_map[name] = safe_name
+        fixed.append((name, safe_name))
+        lines[index] = "[model_providers.%s]" % safe_name
+
+        for inner_index in range(index + 1, len(lines)):
+            stripped = lines[inner_index].strip()
+            if stripped.startswith("[") and stripped.endswith("]"):
+                break
+            key, _ = parse_simple_toml_kv(stripped)
+            if key == "name":
+                prefix = lines[inner_index][: len(lines[inner_index]) - len(lines[inner_index].lstrip())]
+                lines[inner_index] = '%sname = "%s"' % (prefix, safe_name)
+                break
+
+    if not fixed:
+        return []
+
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        key, value = parse_simple_toml_kv(stripped)
+        if key == "model_provider" and value in rename_map:
+            prefix = line[: len(line) - len(line.lstrip())]
+            lines[index] = '%smodel_provider = "%s"' % (prefix, rename_map[value])
+            break
+
+    backup_config_file(codex_home, backup_dir)
+    write_text(config_path, "\n".join(lines) + "\n")
+    return fixed
 
 
 def repair_codex_home(codex_home, scan):
@@ -888,24 +1007,30 @@ def repair_codex_home(codex_home, scan):
     if source_provider not in read_defined_model_providers(codex_home):
         raise RuntimeError("config.toml 未定义该 model provider：%s" % source_provider)
 
+    reserved_in_config = scan.get("reserved_in_config", [])
     missing = scan.get("missing_history_providers", [])
-    if not missing:
+    if not missing and not reserved_in_config:
         result = scan_codex_home(codex_home, verify_only=True)
         result["action"] = "修复配置"
         result["aliases_added"] = []
+        result["reserved_fixed"] = []
         result["config_changed"] = False
         result["db_changed"] = 0
         result["jsonl_changed"] = 0
         return result
 
     backup_dir = create_backup_dir(codex_home)
+    reserved_fixed = fix_reserved_provider_blocks_in_config(codex_home, backup_dir)
+    rename_map = dict(reserved_fixed)
+    source_provider = rename_map.get(source_provider, source_provider)
     added = add_provider_aliases_to_config(codex_home, source_provider, missing, backup_dir)
 
     result = scan_codex_home(codex_home, verify_only=True)
     result["action"] = "修复配置"
     result["backup_dir"] = backup_dir
     result["aliases_added"] = added
-    result["config_changed"] = bool(added)
+    result["reserved_fixed"] = reserved_fixed
+    result["config_changed"] = bool(added) or bool(reserved_fixed)
     result["db_changed"] = 0
     result["jsonl_changed"] = 0
     return result
@@ -1152,7 +1277,19 @@ def format_log(result):
     archived_count = len([item for item in thread_list if item["archived"]])
 
     if action == "修复配置":
-        return "配置修复完成。当前供货商链接：%s。" % (result.get("active_vendor_url") or "(无)")
+        reserved_fixed = result.get("reserved_fixed", [])
+        aliases_added = result.get("aliases_added", [])
+        parts = []
+        if reserved_fixed:
+            parts.append(
+                "重命名了保留 provider：%s"
+                % ", ".join("%s -> %s" % (old, new) for old, new in reserved_fixed)
+            )
+        if aliases_added:
+            parts.append("添加了别名：%s" % ", ".join(aliases_added))
+        if not parts:
+            parts.append("当前供货商链接：%s" % (result.get("active_vendor_url") or "(无)"))
+        return "配置修复完成。%s。" % "；".join(parts)
     if action == "重写历史":
         return "历史重写完成。数据库修改：%s，会话文件修改：%s。" % (
             result.get("db_changed", 0),
