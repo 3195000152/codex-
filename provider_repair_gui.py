@@ -1,8 +1,10 @@
 import datetime
 import json
 import os
+import subprocess
 import shutil
 import sqlite3
+import sys
 import threading
 import traceback
 import uuid
@@ -12,7 +14,13 @@ try:
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
 except ImportError:
-    raise SystemExit("Tkinter is required to run this tool.")
+    if sys.platform.startswith("linux"):
+        hint = "Tkinter is required to run this tool. On Ubuntu/Debian, install it with: sudo apt install python3-tk"
+    elif sys.platform == "darwin":
+        hint = "Tkinter is required to run this tool. Install a Python build that includes Tk support."
+    else:
+        hint = "Tkinter is required to run this tool."
+    raise SystemExit(hint)
 
 
 APP_TITLE = "Codex 对话恢复与清理工具"
@@ -23,12 +31,50 @@ def get_backup_root():
     return os.path.join(os.path.abspath(os.getcwd()), "备份")
 
 
+def choose_font(root, candidates, fallback):
+    available = {name.lower() for name in root.tk.call("font", "families")}
+    for name in candidates:
+        if name.lower() in available:
+            return name
+    return root.tk.call("font", "actual", fallback, "-family")
+
+
+def open_directory(path):
+    if sys.platform.startswith("win"):
+        os.startfile(path)
+        return
+
+    if sys.platform == "darwin":
+        subprocess.Popen(["open", path])
+        return
+
+    for opener in ("xdg-open", "gio", "kde-open"):
+        executable = shutil.which(opener)
+        if not executable:
+            continue
+        command = [executable, "open", path] if opener == "gio" else [executable, path]
+        subprocess.Popen(command)
+        return
+
+    raise RuntimeError("找不到可用的目录打开工具，请手动打开：%s" % path)
+
+
 class ProviderRepairApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title(APP_TITLE)
         self.geometry("1180x860")
         self.minsize(1020, 740)
+        self.ui_font = choose_font(
+            self,
+            ("Microsoft YaHei UI", "Noto Sans CJK SC", "WenQuanYi Micro Hei", "PingFang SC"),
+            "TkDefaultFont",
+        )
+        self.mono_font = choose_font(
+            self,
+            ("Consolas", "DejaVu Sans Mono", "Noto Sans Mono CJK SC", "Courier New"),
+            "TkFixedFont",
+        )
 
         self.codex_home_var = tk.StringVar(value=DEFAULT_CODEX_HOME)
         self.current_provider_var = tk.StringVar(value="-")
@@ -60,7 +106,7 @@ class ProviderRepairApp(tk.Tk):
         header = ttk.Frame(root)
         header.grid(row=0, column=0, sticky="ew")
         header.columnconfigure(0, weight=1)
-        ttk.Label(header, text=APP_TITLE, font=("Microsoft YaHei UI", 15, "bold")).grid(row=0, column=0, sticky="w")
+        ttk.Label(header, text=APP_TITLE, font=(self.ui_font, 15, "bold")).grid(row=0, column=0, sticky="w")
         ttk.Label(header, textvariable=self.status_var).grid(row=0, column=1, sticky="e")
 
         path_row = ttk.Frame(root)
@@ -75,7 +121,7 @@ class ProviderRepairApp(tk.Tk):
         info_card.columnconfigure(1, weight=1)
 
         ttk.Label(info_card, text="当前 Provider").grid(row=0, column=0, sticky="w", padx=10, pady=(10, 6))
-        ttk.Label(info_card, textvariable=self.current_provider_var, font=("Consolas", 11, "bold")).grid(
+        ttk.Label(info_card, textvariable=self.current_provider_var, font=(self.mono_font, 11, "bold")).grid(
             row=0, column=1, sticky="w", padx=(0, 10), pady=(10, 6)
         )
 
@@ -95,13 +141,13 @@ class ProviderRepairApp(tk.Tk):
         counts.columnconfigure(7, weight=1)
 
         ttk.Label(counts, text="聊天窗口").grid(row=0, column=0, sticky="w")
-        ttk.Label(counts, textvariable=self.active_count_var, font=("Consolas", 11, "bold")).grid(row=0, column=1, sticky="w")
+        ttk.Label(counts, textvariable=self.active_count_var, font=(self.mono_font, 11, "bold")).grid(row=0, column=1, sticky="w")
         ttk.Label(counts, text="归档对话").grid(row=0, column=2, sticky="w", padx=(18, 0))
-        ttk.Label(counts, textvariable=self.archived_count_var, font=("Consolas", 11, "bold")).grid(row=0, column=3, sticky="w")
+        ttk.Label(counts, textvariable=self.archived_count_var, font=(self.mono_font, 11, "bold")).grid(row=0, column=3, sticky="w")
         ttk.Label(counts, text="已同步").grid(row=0, column=4, sticky="w", padx=(18, 0))
-        ttk.Label(counts, textvariable=self.synced_count_var, font=("Consolas", 11, "bold")).grid(row=0, column=5, sticky="w")
+        ttk.Label(counts, textvariable=self.synced_count_var, font=(self.mono_font, 11, "bold")).grid(row=0, column=5, sticky="w")
         ttk.Label(counts, text="总聊天记录内存").grid(row=0, column=6, sticky="w", padx=(18, 0))
-        ttk.Label(counts, textvariable=self.total_memory_var, font=("Consolas", 11, "bold")).grid(row=0, column=7, sticky="w")
+        ttk.Label(counts, textvariable=self.total_memory_var, font=(self.mono_font, 11, "bold")).grid(row=0, column=7, sticky="w")
 
         actions = ttk.Frame(root)
         actions.grid(row=3, column=0, sticky="ew", pady=(10, 8))
@@ -392,7 +438,10 @@ class ProviderRepairApp(tk.Tk):
     def open_backup_dir(self):
         path = self.backup_dir or get_backup_root()
         if os.path.isdir(path):
-            os.startfile(path)
+            try:
+                open_directory(path)
+            except Exception as exc:
+                messagebox.showerror(APP_TITLE, "无法打开备份目录：\n%s" % exc)
         else:
             messagebox.showinfo(APP_TITLE, "备份目录暂时还不存在。")
 

@@ -112,21 +112,37 @@
 默认扫描：
 
 ```text
-C:\Users\Administrator\.codex
+~/.codex
 ```
 
 你也可以在界面里手动切换到其他 Codex 目录。
 
 ## 启动方式
 
+### Windows
+
 双击下面任意一个文件即可：
 
 - `start_provider_repair.bat`
 - `启动恢复工具.bat`
 
+### Linux / macOS
+
+在项目目录执行：
+
+```bash
+./start_provider_repair.sh
+```
+
+也可以直接执行：
+
+```bash
+python3 provider_repair_gui.py
+```
+
 ## 环境与启动要求
 
-- Windows 系统
+- Windows、Linux 或 macOS
 - Python 3.8 及以上
 - Tkinter
 
@@ -155,14 +171,28 @@ C:\Users\Administrator\.codex
 
 - 这个工具不会自动安装 Python
 - 也不会自动安装依赖环境
-- 启动脚本只是执行 `python provider_repair_gui.py`
+- Windows 启动脚本只是执行 `python provider_repair_gui.py`
+- Linux/macOS 启动脚本会执行 `python3 provider_repair_gui.py`
 - 如果系统里没有 Python，或当前 Python 没带 `Tkinter`，程序就无法启动
 - 如果你的 Python 缺少 `Tkinter`，程序会直接报错并退出
+
+Linux 常见 Tkinter 安装方式：
+
+```bash
+# Ubuntu / Debian
+sudo apt install python3-tk
+
+# Fedora
+sudo dnf install python3-tkinter
+
+# Arch Linux
+sudo pacman -S tk
+```
 
 建议：
 
 - 推荐安装 Python 3.10、3.11 或 3.12
-- 安装 Python 时勾选 `Add Python to PATH`
+- Windows 安装 Python 时勾选 `Add Python to PATH`
 - 安装完成后可在命令行执行 `python --version` 检查是否生效
 
 ## 文件说明
@@ -170,4 +200,5 @@ C:\Users\Administrator\.codex
 - `provider_repair_gui.py`：主程序
 - `start_provider_repair.bat`：英文启动脚本
 - `启动恢复工具.bat`：中文启动脚本
+- `start_provider_repair.sh`：Linux/macOS 启动脚本
 - `备份/`：运行后自动生成的备份目录
