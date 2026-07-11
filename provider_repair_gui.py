@@ -1,8 +1,10 @@
 import datetime
 import json
 import os
+import subprocess
 import shutil
 import sqlite3
+import sys
 import threading
 import traceback
 import uuid
@@ -12,15 +14,71 @@ try:
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
 except ImportError:
-    raise SystemExit("Tkinter is required to run this tool.")
+    if sys.platform.startswith("linux"):
+        hint = "Tkinter is required to run this tool. On Ubuntu/Debian, install it with: sudo apt install python3-tk"
+    elif sys.platform == "darwin":
+        hint = "Tkinter is required to run this tool. Install a Python build that includes Tk support."
+    else:
+        hint = "Tkinter is required to run this tool."
+    raise SystemExit(hint)
 
 
 APP_TITLE = "Codex 对话恢复与清理工具"
 DEFAULT_CODEX_HOME = os.path.join(os.path.expanduser("~"), ".codex")
+RESERVED_PROVIDER_IDS = {
+    "openai",
+    "anthropic",
+    "google",
+    "azure",
+    "mistral",
+    "cohere",
+    "meta",
+    "xai",
+    "deepseek",
+    "perplexity",
+}
+BUILTIN_PROVIDER_RENAME_SUFFIX = "-custom"
+
+
+def sanitize_provider_name(name):
+    if name and name.lower() in RESERVED_PROVIDER_IDS:
+        return name + BUILTIN_PROVIDER_RENAME_SUFFIX
+    return name
 
 
 def get_backup_root():
+    configured = os.environ.get("CODEX_PROVIDER_REPAIR_BACKUP_DIR")
+    if configured:
+        return os.path.abspath(os.path.expanduser(configured))
     return os.path.join(os.path.abspath(os.getcwd()), "备份")
+
+
+def choose_font(root, candidates, fallback):
+    available = {name.lower() for name in root.tk.call("font", "families")}
+    for name in candidates:
+        if name.lower() in available:
+            return name
+    return root.tk.call("font", "actual", fallback, "-family")
+
+
+def open_directory(path):
+    if sys.platform.startswith("win"):
+        os.startfile(path)
+        return
+
+    if sys.platform == "darwin":
+        subprocess.Popen(["open", path])
+        return
+
+    for opener in ("xdg-open", "gio", "kde-open"):
+        executable = shutil.which(opener)
+        if not executable:
+            continue
+        command = [executable, "open", path] if opener == "gio" else [executable, path]
+        subprocess.Popen(command)
+        return
+
+    raise RuntimeError("找不到可用的目录打开工具，请手动打开：%s" % path)
 
 
 class ProviderRepairApp(tk.Tk):
@@ -29,6 +87,16 @@ class ProviderRepairApp(tk.Tk):
         self.title(APP_TITLE)
         self.geometry("1180x860")
         self.minsize(1020, 740)
+        self.ui_font = choose_font(
+            self,
+            ("Microsoft YaHei UI", "Noto Sans CJK SC", "WenQuanYi Micro Hei", "PingFang SC"),
+            "TkDefaultFont",
+        )
+        self.mono_font = choose_font(
+            self,
+            ("Consolas", "DejaVu Sans Mono", "Noto Sans Mono CJK SC", "Courier New"),
+            "TkFixedFont",
+        )
 
         self.codex_home_var = tk.StringVar(value=DEFAULT_CODEX_HOME)
         self.current_provider_var = tk.StringVar(value="-")
@@ -60,7 +128,7 @@ class ProviderRepairApp(tk.Tk):
         header = ttk.Frame(root)
         header.grid(row=0, column=0, sticky="ew")
         header.columnconfigure(0, weight=1)
-        ttk.Label(header, text=APP_TITLE, font=("Microsoft YaHei UI", 15, "bold")).grid(row=0, column=0, sticky="w")
+        ttk.Label(header, text=APP_TITLE, font=(self.ui_font, 15, "bold")).grid(row=0, column=0, sticky="w")
         ttk.Label(header, textvariable=self.status_var).grid(row=0, column=1, sticky="e")
 
         path_row = ttk.Frame(root)
@@ -75,7 +143,7 @@ class ProviderRepairApp(tk.Tk):
         info_card.columnconfigure(1, weight=1)
 
         ttk.Label(info_card, text="当前 Provider").grid(row=0, column=0, sticky="w", padx=10, pady=(10, 6))
-        ttk.Label(info_card, textvariable=self.current_provider_var, font=("Consolas", 11, "bold")).grid(
+        ttk.Label(info_card, textvariable=self.current_provider_var, font=(self.mono_font, 11, "bold")).grid(
             row=0, column=1, sticky="w", padx=(0, 10), pady=(10, 6)
         )
 
@@ -95,13 +163,13 @@ class ProviderRepairApp(tk.Tk):
         counts.columnconfigure(7, weight=1)
 
         ttk.Label(counts, text="聊天窗口").grid(row=0, column=0, sticky="w")
-        ttk.Label(counts, textvariable=self.active_count_var, font=("Consolas", 11, "bold")).grid(row=0, column=1, sticky="w")
+        ttk.Label(counts, textvariable=self.active_count_var, font=(self.mono_font, 11, "bold")).grid(row=0, column=1, sticky="w")
         ttk.Label(counts, text="归档对话").grid(row=0, column=2, sticky="w", padx=(18, 0))
-        ttk.Label(counts, textvariable=self.archived_count_var, font=("Consolas", 11, "bold")).grid(row=0, column=3, sticky="w")
+        ttk.Label(counts, textvariable=self.archived_count_var, font=(self.mono_font, 11, "bold")).grid(row=0, column=3, sticky="w")
         ttk.Label(counts, text="已同步").grid(row=0, column=4, sticky="w", padx=(18, 0))
-        ttk.Label(counts, textvariable=self.synced_count_var, font=("Consolas", 11, "bold")).grid(row=0, column=5, sticky="w")
+        ttk.Label(counts, textvariable=self.synced_count_var, font=(self.mono_font, 11, "bold")).grid(row=0, column=5, sticky="w")
         ttk.Label(counts, text="总聊天记录内存").grid(row=0, column=6, sticky="w", padx=(18, 0))
-        ttk.Label(counts, textvariable=self.total_memory_var, font=("Consolas", 11, "bold")).grid(row=0, column=7, sticky="w")
+        ttk.Label(counts, textvariable=self.total_memory_var, font=(self.mono_font, 11, "bold")).grid(row=0, column=7, sticky="w")
 
         actions = ttk.Frame(root)
         actions.grid(row=3, column=0, sticky="ew", pady=(10, 8))
@@ -254,9 +322,15 @@ class ProviderRepairApp(tk.Tk):
         codex_home = self.codex_home_var.get()
         scan = scan_codex_home(codex_home)
         provider = scan["current_provider"]
+        is_builtin = scan.get("provider_is_builtin", False)
 
         if not provider:
-            messagebox.showerror(APP_TITLE, "无法从 config.toml 读取 model_provider。")
+            messagebox.showerror(
+                APP_TITLE,
+                "无法识别当前使用的 provider。\n\n"
+                "config.toml 中没有 model_provider 设置，数据库中也没有历史记录可供推断。\n"
+                "请先在 Codex 中开始一次对话，然后再试。",
+            )
             self.apply_result(scan)
             return
 
@@ -270,19 +344,46 @@ class ProviderRepairApp(tk.Tk):
             self.apply_result(scan)
             return
 
+        reserved_in_config = scan.get("reserved_in_config", [])
         missing = scan.get("missing_history_providers", [])
-        if not missing:
-            messagebox.showinfo(APP_TITLE, "没有发现缺失的历史 provider，当前配置已经兼容。")
+        if is_builtin and missing:
+            msg = (
+                "当前使用的是内置 provider '%s'，无需自定义配置。\n\n"
+                "但发现历史对话使用了其他 provider：\n%s\n\n"
+                "这些对话可能无法正常加载。\n\n"
+                "建议使用「高级：重写历史」功能，将这些历史记录统一改为当前 provider '%s'。\n\n"
+                "是否现在打开重写历史？"
+            ) % (provider, ", ".join(missing), provider)
+            if messagebox.askyesno(APP_TITLE, msg):
+                self.rewrite_history()
+            else:
+                self.apply_result(scan)
+            return
+
+        if not missing and not reserved_in_config:
+            if is_builtin:
+                messagebox.showinfo(APP_TITLE, "当前使用内置 provider '%s'，配置完全兼容，无需修复。" % provider)
+            else:
+                messagebox.showinfo(APP_TITLE, "没有发现缺失的历史 provider，当前配置已经兼容。")
             self.apply_result(scan)
             return
 
-        vendor_url = scan.get("active_vendor_url") or "-"
-        msg = (
-            "将先备份 config.toml，然后为这些历史 provider 名称补充兼容别名：\n\n"
-            "%s\n\n"
-            "这些别名都会指向当前使用的供货商链接：\n%s\n\n"
-            "是否继续？"
-        ) % (", ".join(missing), vendor_url)
+        parts = []
+        if reserved_in_config:
+            parts.append(
+                "检测到 config.toml 使用了保留的内置 provider ID：%s\n"
+                "将自动重命名为安全名称，例如 openai -> openai-custom。"
+                % ", ".join(reserved_in_config)
+            )
+        if missing:
+            vendor_url = scan.get("active_vendor_url") or "-"
+            parts.append(
+                "为这些历史 provider 名称补充兼容别名：\n%s\n\n"
+                "这些别名都会指向当前使用的供货商链接：\n%s"
+                % (", ".join(missing), vendor_url)
+            )
+
+        msg = "将先备份 config.toml，然后：\n\n%s\n\n是否继续？" % "\n\n".join(parts)
         if not messagebox.askyesno(APP_TITLE, msg):
             self.apply_result(scan)
             return
@@ -295,7 +396,10 @@ class ProviderRepairApp(tk.Tk):
         provider = scan["current_provider"]
 
         if not provider:
-            messagebox.showerror(APP_TITLE, "无法从 config.toml 读取 model_provider。")
+            messagebox.showerror(
+                APP_TITLE,
+                "无法识别当前使用的 provider。\n\n请先在 Codex 中开始一次对话，然后再试。",
+            )
             self.apply_result(scan)
             return
 
@@ -392,7 +496,10 @@ class ProviderRepairApp(tk.Tk):
     def open_backup_dir(self):
         path = self.backup_dir or get_backup_root()
         if os.path.isdir(path):
-            os.startfile(path)
+            try:
+                open_directory(path)
+            except Exception as exc:
+                messagebox.showerror(APP_TITLE, "无法打开备份目录：\n%s" % exc)
         else:
             messagebox.showinfo(APP_TITLE, "备份目录暂时还不存在。")
 
@@ -473,15 +580,74 @@ def parse_simple_toml_kv(line):
     return key, value
 
 
+def is_model_provider_setting(stripped_line):
+    key, _ = parse_simple_toml_kv(stripped_line)
+    return key == "model_provider"
+
+
+def read_auth_mode(codex_home):
+    auth_path = os.path.join(codex_home, "auth.json")
+    if not os.path.isfile(auth_path):
+        return None
+    try:
+        with open(auth_path, "r", encoding="utf-8") as f:
+            auth = json.load(f)
+    except Exception:
+        return None
+
+    mode = (auth.get("auth_mode") or "").lower()
+    if mode == "chatgpt":
+        return "openai"
+    if mode in RESERVED_PROVIDER_IDS:
+        return mode
+    return None
+
+
+def infer_provider_from_database(codex_home):
+    state_db = os.path.join(codex_home, "state_5.sqlite")
+    if not os.path.isfile(state_db):
+        return None
+    con = None
+    try:
+        con = sqlite3.connect("file:%s?mode=ro" % state_db, uri=True)
+        rows = con.execute(
+            """
+            select model_provider, count(*) as cnt
+            from threads
+            where model_provider is not null and model_provider <> ''
+            group by model_provider
+            order by cnt desc
+            limit 1
+            """
+        ).fetchall()
+    except sqlite3.Error:
+        return None
+    finally:
+        if con is not None:
+            con.close()
+
+    if rows:
+        return rows[0][0]
+    return None
+
+
 def read_current_provider(codex_home):
     config_path = os.path.join(codex_home, "config.toml")
-    if not os.path.isfile(config_path):
-        return None
-    for line in read_text(config_path).splitlines():
-        stripped = line.strip()
-        if stripped.startswith("model_provider"):
-            _, value = parse_simple_toml_kv(stripped)
-            return value
+    if os.path.isfile(config_path):
+        for line in read_text(config_path).splitlines():
+            stripped = line.strip()
+            if is_model_provider_setting(stripped):
+                _, value = parse_simple_toml_kv(stripped)
+                if value:
+                    return value
+
+    auth_provider = read_auth_mode(codex_home)
+    if auth_provider:
+        return auth_provider
+
+    inferred = infer_provider_from_database(codex_home)
+    if inferred:
+        return inferred
     return None
 
 
@@ -660,6 +826,8 @@ def scan_codex_home(codex_home, verify_only=False):
     provider = read_current_provider(codex_home)
     defined_profiles = read_model_provider_profiles(codex_home)
     defined_providers = set(defined_profiles.keys())
+    provider_is_builtin = bool(provider and provider.lower() in RESERVED_PROVIDER_IDS)
+    provider_defined = bool((provider and provider in defined_providers) or provider_is_builtin)
     repair_source_provider = choose_repair_source_provider(provider, defined_profiles)
 
     current_profile = defined_profiles.get(provider) if provider else None
@@ -667,19 +835,24 @@ def scan_codex_home(codex_home, verify_only=False):
 
     codex_current_url = (current_profile or {}).get("base_url")
     active_vendor_url = (active_profile or {}).get("base_url")
-    current_vendor_name = infer_vendor_name(repair_source_provider, active_profile)
+    current_vendor_name = "%s (内置)" % provider if provider_is_builtin else infer_vendor_name(repair_source_provider, active_profile)
     state_db = os.path.join(codex_home, "state_5.sqlite")
+    reserved_in_config = sorted(
+        name for name in defined_providers if name.lower() in RESERVED_PROVIDER_IDS
+    )
 
     result = {
         "action": "验证" if verify_only else "扫描",
         "codex_home": codex_home,
         "current_provider": provider,
-        "provider_defined": bool(provider and provider in defined_providers),
+        "provider_defined": provider_defined,
+        "provider_is_builtin": provider_is_builtin,
         "provider_defined_names": sorted(defined_providers),
         "repair_source_provider": repair_source_provider,
         "current_vendor_name": current_vendor_name,
-        "active_vendor_url": active_vendor_url,
-        "codex_current_url": codex_current_url,
+        "active_vendor_url": active_vendor_url or ("(内置)" if provider_is_builtin else None),
+        "codex_current_url": codex_current_url or ("(内置)" if provider_is_builtin else None),
+        "reserved_in_config": reserved_in_config,
         "db_counts": {},
         "db_total": 0,
         "db_non_current": 0,
@@ -691,6 +864,15 @@ def scan_codex_home(codex_home, verify_only=False):
         "missing_history_providers": [],
         "errors": [],
     }
+
+    if reserved_in_config:
+        result["errors"].append(
+            "config.toml 包含保留的内置 provider ID：%s。建议改名为 %s。"
+            % (
+                ", ".join(reserved_in_config),
+                ", ".join(sanitize_provider_name(name) for name in reserved_in_config),
+            )
+        )
 
     history_providers = set()
 
@@ -733,7 +915,12 @@ def scan_codex_home(codex_home, verify_only=False):
         result["errors"].append("读取聊天列表失败：%s" % exc)
 
     result["missing_history_providers"] = sorted(
-        name for name in history_providers if name and name not in defined_providers
+        name
+        for name in history_providers
+        if name
+        and name != provider
+        and name.lower() not in RESERVED_PROVIDER_IDS
+        and name not in defined_providers
     )
     return result
 
@@ -782,6 +969,33 @@ def extract_provider_block(text, provider_name):
     return "\n".join(lines[start:end]).rstrip()
 
 
+def parse_model_provider_header(line):
+    stripped = line.strip()
+    prefix = "[model_providers."
+    if not stripped.startswith(prefix) or not stripped.endswith("]"):
+        return None
+    name = stripped[len(prefix):-1].strip()
+    if name.startswith('"') and name.endswith('"'):
+        name = name[1:-1]
+    elif name.startswith("'") and name.endswith("'"):
+        name = name[1:-1]
+    return name or None
+
+
+def unique_safe_provider_name(name, existing_names):
+    base = sanitize_provider_name(name)
+    existing_lower = {item.lower() for item in existing_names}
+    if base.lower() not in existing_lower or base.lower() == name.lower():
+        return base
+
+    index = 2
+    while True:
+        candidate = "%s-%s" % (base, index)
+        if candidate.lower() not in existing_lower:
+            return candidate
+        index += 1
+
+
 def build_alias_block(source_block, alias_name):
     lines = source_block.splitlines()
     header = "[model_providers.%s]" % alias_name
@@ -813,15 +1027,65 @@ def add_provider_aliases_to_config(codex_home, source_provider, aliases, backup_
     added = []
     new_text = text.rstrip()
     for alias in aliases:
-        if extract_provider_block(new_text, alias):
+        safe_alias = sanitize_provider_name(alias)
+        if extract_provider_block(new_text, safe_alias):
             continue
-        new_text += "\n\n" + build_alias_block(source_block, alias)
-        added.append(alias)
+        new_text += "\n\n" + build_alias_block(source_block, safe_alias)
+        added.append(safe_alias)
     new_text += "\n"
 
     if added:
         write_text(config_path, new_text)
     return added
+
+
+def fix_reserved_provider_blocks_in_config(codex_home, backup_dir):
+    config_path = os.path.join(codex_home, "config.toml")
+    if not os.path.isfile(config_path):
+        return []
+
+    text = read_text(config_path)
+    lines = text.splitlines()
+    existing_names = set(read_model_provider_profiles(codex_home).keys())
+    rename_map = {}
+    fixed = []
+
+    for index, line in enumerate(lines):
+        name = parse_model_provider_header(line)
+        if not name or name.lower() not in RESERVED_PROVIDER_IDS:
+            continue
+
+        safe_name = unique_safe_provider_name(name, existing_names)
+        existing_names.discard(name)
+        existing_names.add(safe_name)
+        rename_map[name] = safe_name
+        fixed.append((name, safe_name))
+        lines[index] = "[model_providers.%s]" % safe_name
+
+        for inner_index in range(index + 1, len(lines)):
+            stripped = lines[inner_index].strip()
+            if stripped.startswith("[") and stripped.endswith("]"):
+                break
+            key, _ = parse_simple_toml_kv(stripped)
+            if key == "name":
+                prefix = lines[inner_index][: len(lines[inner_index]) - len(lines[inner_index].lstrip())]
+                lines[inner_index] = '%sname = "%s"' % (prefix, safe_name)
+                break
+
+    if not fixed:
+        return []
+
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        key, value = parse_simple_toml_kv(stripped)
+        if key == "model_provider" and value in rename_map:
+            prefix = line[: len(line) - len(line.lstrip())]
+            lines[index] = '%smodel_provider = "%s"' % (prefix, rename_map[value])
+            break
+
+    backup_config_file(codex_home, backup_dir)
+    write_text(config_path, "\n".join(lines) + "\n")
+    return fixed
 
 
 def repair_codex_home(codex_home, scan):
@@ -836,24 +1100,30 @@ def repair_codex_home(codex_home, scan):
     if source_provider not in read_defined_model_providers(codex_home):
         raise RuntimeError("config.toml 未定义该 model provider：%s" % source_provider)
 
+    reserved_in_config = scan.get("reserved_in_config", [])
     missing = scan.get("missing_history_providers", [])
-    if not missing:
+    if not missing and not reserved_in_config:
         result = scan_codex_home(codex_home, verify_only=True)
         result["action"] = "修复配置"
         result["aliases_added"] = []
+        result["reserved_fixed"] = []
         result["config_changed"] = False
         result["db_changed"] = 0
         result["jsonl_changed"] = 0
         return result
 
     backup_dir = create_backup_dir(codex_home)
+    reserved_fixed = fix_reserved_provider_blocks_in_config(codex_home, backup_dir)
+    rename_map = dict(reserved_fixed)
+    source_provider = rename_map.get(source_provider, source_provider)
     added = add_provider_aliases_to_config(codex_home, source_provider, missing, backup_dir)
 
     result = scan_codex_home(codex_home, verify_only=True)
     result["action"] = "修复配置"
     result["backup_dir"] = backup_dir
     result["aliases_added"] = added
-    result["config_changed"] = bool(added)
+    result["reserved_fixed"] = reserved_fixed
+    result["config_changed"] = bool(added) or bool(reserved_fixed)
     result["db_changed"] = 0
     result["jsonl_changed"] = 0
     return result
@@ -942,9 +1212,10 @@ def repair_jsonl_files(codex_home, provider, backup_dir):
 def rewrite_history_to_current_provider(codex_home, scan):
     codex_home = os.path.abspath(os.path.expanduser(codex_home))
     provider = scan["current_provider"]
+    is_builtin = scan.get("provider_is_builtin", False)
     if not provider:
         raise RuntimeError("在 config.toml 中没有找到当前 provider。")
-    if provider not in read_defined_model_providers(codex_home):
+    if not is_builtin and provider not in read_defined_model_providers(codex_home):
         raise RuntimeError("config.toml 未定义该 model provider：%s" % provider)
 
     backup_dir = create_backup_dir(codex_home)
@@ -1100,7 +1371,19 @@ def format_log(result):
     archived_count = len([item for item in thread_list if item["archived"]])
 
     if action == "修复配置":
-        return "配置修复完成。当前供货商链接：%s。" % (result.get("active_vendor_url") or "(无)")
+        reserved_fixed = result.get("reserved_fixed", [])
+        aliases_added = result.get("aliases_added", [])
+        parts = []
+        if reserved_fixed:
+            parts.append(
+                "重命名了保留 provider：%s"
+                % ", ".join("%s -> %s" % (old, new) for old, new in reserved_fixed)
+            )
+        if aliases_added:
+            parts.append("添加了别名：%s" % ", ".join(aliases_added))
+        if not parts:
+            parts.append("当前供货商链接：%s" % (result.get("active_vendor_url") or "(无)"))
+        return "配置修复完成。%s。" % "；".join(parts)
     if action == "重写历史":
         return "历史重写完成。数据库修改：%s，会话文件修改：%s。" % (
             result.get("db_changed", 0),

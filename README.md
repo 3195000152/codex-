@@ -9,6 +9,7 @@
 ## 这个工具能做什么
 
 - 自动识别当前正在使用的 Provider
+- 未显式配置 `model_provider` 时，可从 `auth.json` 或历史数据库推断当前 Provider
 - 自动识别当前供应商链接和 Codex 配置里实际使用的链接
 - 扫描聊天窗口、归档对话、历史会话文件
 - 显示聊天数量、已同步数量、总聊天记录内存
@@ -16,6 +17,8 @@
 - 支持单选、批量勾选删除聊天记录
 - 删除前自动备份数据库、会话文件和配置
 - 修复 `config.toml` 中缺失的历史 provider 映射
+- 识别并修复 `openai` 等保留内置 provider ID 被当作自定义配置名使用的问题
+- 支持将历史记录重写到 `openai` 等内置 provider
 - 在需要时可高级重写历史记录中的 provider 名称
 
 ## 适用场景
@@ -68,8 +71,9 @@
 
 1. 自动识别当前实际启用的供应商配置
 2. 备份 `config.toml`
-3. 将历史聊天里出现过、但当前配置缺失的 provider 名称补成兼容别名
-4. 让这些历史 provider 指向当前可用的供应商配置
+3. 将 `openai` 等保留的内置 provider ID 重命名为安全的自定义名称，例如 `openai-custom`
+4. 将历史聊天里出现过、但当前配置缺失的 provider 名称补成兼容别名
+5. 让这些历史 provider 指向当前可用的供应商配置
 
 ### 3. 高级重写历史
 
@@ -99,34 +103,85 @@
 
 ## 备份机制
 
-程序会在当前目录下自动创建 `备份` 文件夹，并把修复或删除前的备份放进去。
+程序会在修复或删除前自动备份数据库、会话文件和配置。
 
-这样做的好处是：
+备份位置：
 
-- 不依赖别人电脑里固定的路径
-- 工具复制到哪里都能直接用
-- 备份位置更直观，方便回滚
+- Windows 双击或从源码目录直接运行时：当前目录下的 `备份/`
+- Linux 安装为桌面应用后：`~/.local/share/codex-provider-repair/backups/`
+
+这样既保留了源码目录直接运行的便携性，也避免 Linux 桌面启动时把备份散落到不明确的位置。
 
 ## 默认目录
 
 默认扫描：
 
 ```text
-C:\Users\Administrator\.codex
+~/.codex
 ```
 
 你也可以在界面里手动切换到其他 Codex 目录。
 
 ## 启动方式
 
+### Windows
+
 双击下面任意一个文件即可：
 
 - `start_provider_repair.bat`
 - `启动恢复工具.bat`
 
+### Linux
+
+推荐安装为桌面应用：
+
+```bash
+./install_linux.sh
+```
+
+安装完成后，可以在应用菜单里搜索并打开：
+
+```text
+Codex 对话恢复与清理工具
+```
+
+也可以在终端运行：
+
+```bash
+codex-provider-repair
+```
+
+卸载：
+
+```bash
+./uninstall_linux.sh
+```
+
+卸载默认会保留备份目录。
+
+如果只是临时从源码目录启动，也可以执行：
+
+```bash
+./start_provider_repair.sh
+```
+
+### macOS
+
+在项目目录执行：
+
+```bash
+./start_provider_repair.sh
+```
+
+也可以直接执行：
+
+```bash
+python3 provider_repair_gui.py
+```
+
 ## 环境与启动要求
 
-- Windows 系统
+- Windows、Linux 或 macOS
 - Python 3.8 及以上
 - Tkinter
 
@@ -145,6 +200,8 @@ C:\Users\Administrator\.codex
 - `os`
 - `shutil`
 - `sqlite3`
+- `subprocess`
+- `sys`
 - `threading`
 - `traceback`
 - `uuid`
@@ -155,14 +212,29 @@ C:\Users\Administrator\.codex
 
 - 这个工具不会自动安装 Python
 - 也不会自动安装依赖环境
-- 启动脚本只是执行 `python provider_repair_gui.py`
+- Windows 启动脚本只是执行 `python provider_repair_gui.py`
+- Linux/macOS 启动脚本会执行 `python3 provider_repair_gui.py`
+- Linux 安装脚本会把应用复制到 `~/.local/share/codex-provider-repair/`，并创建 `~/.local/share/applications/codex-provider-repair.desktop`
 - 如果系统里没有 Python，或当前 Python 没带 `Tkinter`，程序就无法启动
 - 如果你的 Python 缺少 `Tkinter`，程序会直接报错并退出
+
+Linux 常见 Tkinter 安装方式：
+
+```bash
+# Ubuntu / Debian
+sudo apt install python3-tk
+
+# Fedora
+sudo dnf install python3-tkinter
+
+# Arch Linux
+sudo pacman -S tk
+```
 
 建议：
 
 - 推荐安装 Python 3.10、3.11 或 3.12
-- 安装 Python 时勾选 `Add Python to PATH`
+- Windows 安装 Python 时勾选 `Add Python to PATH`
 - 安装完成后可在命令行执行 `python --version` 检查是否生效
 
 ## 文件说明
@@ -170,4 +242,7 @@ C:\Users\Administrator\.codex
 - `provider_repair_gui.py`：主程序
 - `start_provider_repair.bat`：英文启动脚本
 - `启动恢复工具.bat`：中文启动脚本
+- `start_provider_repair.sh`：Linux/macOS 启动脚本
+- `install_linux.sh`：Linux 用户级安装脚本，会创建应用菜单入口
+- `uninstall_linux.sh`：Linux 用户级卸载脚本
 - `备份/`：运行后自动生成的备份目录
